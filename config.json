@@ -1,0 +1,9 @@
+{
+  "topUrl": "https://awacs-portal2.icloud-prd.eu-west-1.aws.pmicloud.biz/speed/ro70-09-10/operators?plant=RO70&area=Secondary",
+  "bottomUrl": "https://awacs-portal2.icloud-prd.eu-west-1.aws.pmicloud.biz/speed/ro70-11-12/operators?plant=RO70&area=Secondary",
+  "dividerRatio": 0.55,
+  "minWidth": 1200,
+  "minHeight": 800,
+  "userAgent": "",
+  "lockToInitialOrigin": false
+}
