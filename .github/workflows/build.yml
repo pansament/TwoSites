@@ -1,0 +1,21 @@
+
+name: build-windows-portable
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npx electron-builder --win portable
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Two-Sites-Viewer-Portable
+          path: dist/*.exe
