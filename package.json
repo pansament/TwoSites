@@ -1,5 +1,5 @@
 {
-  "name": "AWACS Bay 3",
+  "name": "AWACS-Bay-3",
   "version": "2.0.0",
   "description": "Single window with two stacked websites (with logging + live config)",
   "main": "main.js",
