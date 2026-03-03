@@ -20,11 +20,11 @@
       "main.js",
       "preload.js",
       "config.json",
-      "package.json"
+      "package.json",
       "assets/favicon.png"
     ],
     "win": {
-      "target": ["portable"]
+      "target": ["portable"],
       "icon": "assets/favicon.png"
     }
   }
