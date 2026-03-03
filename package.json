@@ -21,9 +21,11 @@
       "preload.js",
       "config.json",
       "package.json"
+      "assets/favicon.png"
     ],
     "win": {
       "target": ["portable"]
+      "icon": "assets/favicon.png"
     }
   }
 }
