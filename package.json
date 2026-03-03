@@ -1,12 +1,12 @@
 {
   "name": "two-sites-viewer",
-  "version": "1.0.1",
-  "description": "Electron app: single window with two stacked websites",
+  "version": "1.0.2",
+  "description": "Electron app: single window with two stacked websites (with logging + live config)",
   "main": "main.js",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "set ELECTRON_ENABLE_LOGGING=1&& electron .",
+    "start": "electron .",
     "build:win": "electron-builder --win portable"
   },
   "devDependencies": {
@@ -23,9 +23,7 @@
       "package.json"
     ],
     "win": {
-      "target": [
-        "portable"
-      ]
+      "target": ["portable"]
     }
   }
 }
