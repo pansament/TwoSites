@@ -1,12 +1,11 @@
-// main.js
+// main.js (ESM)
 import { app, BrowserWindow, BrowserView } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 
-// ---- Runtime safety: reduce chances of "blank" windows on some GPUs/VMs
+// Improve compatibility with some enterprise GPUs/VMs
 app.disableHardwareAcceleration();
 
-// -------- Globals
 let mainWindow;
 let topView;
 let bottomView;
@@ -14,30 +13,7 @@ let config;
 let cfgPathInUse = null;
 let defaultUA = { top: null, bottom: null };
 
-// ---- Helpers
-
-function getExeDir() {
-  try {
-    return path.dirname(app.getPath('exe'));
-  } catch {
-    return process.cwd();
-  }
-}
-
-function findConfigPath() {
-  const exeDir = getExeDir();
-  const candidates = [
-    path.join(exeDir, 'config.json'),        // portable / next to EXE (preferred)
-    path.join(process.cwd(), 'config.json'), // dev fallback
-  ];
-  for (const p of candidates) {
-    try {
-      if (fs.existsSync(p)) return p;
-    } catch {}
-  }
-  // If none exist, default to exeDir for future writes/expectations
-  return path.join(exeDir, 'config.json');
-}
+// ---------- Config loading ----------
 
 function normalizeConfig(cfg) {
   return {
@@ -51,6 +27,35 @@ function normalizeConfig(cfg) {
   };
 }
 
+function candidatesForConfig() {
+  const portableDir = process.env.PORTABLE_EXECUTABLE_DIR; // electron-builder portable
+  const exeDir = path.dirname(app.getPath('exe'));
+  const cwd = process.cwd();
+  const userData = app.getPath('userData');     // optional override location
+  const resources = process.resourcesPath;      // baked default (if you ship one inside asar)
+
+  const list = [];
+  if (portableDir) list.push(path.join(portableDir, 'config.json'));
+  list.push(
+    path.join(exeDir, 'config.json'),
+    path.join(cwd, 'config.json'),
+    path.join(userData, 'config.json'),
+    path.join(resources, 'config.json') // final fallback if bundled
+  );
+  return list;
+}
+
+function findConfigPath() {
+  for (const p of candidatesForConfig()) {
+    try { if (fs.existsSync(p)) return p; } catch {}
+  }
+  // If nothing exists, prefer PORTABLE_EXECUTABLE_DIR (if present) for future writes
+  if (process.env.PORTABLE_EXECUTABLE_DIR) {
+    return path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'config.json');
+  }
+  return path.join(path.dirname(app.getPath('exe')), 'config.json');
+}
+
 function loadConfig() {
   const p = cfgPathInUse || findConfigPath();
   cfgPathInUse = p;
@@ -61,9 +66,11 @@ function loadConfig() {
       return normalizeConfig(parsed);
     }
   } catch {}
-  // Fallback defaults (you can inline your own baked defaults here if desired)
+  // Fallback defaults — you can put your AWACS URLs here as a baked default if you want
   return normalizeConfig({});
 }
+
+// ---------- Navigation guard ----------
 
 function getOrigin(u) {
   try {
@@ -87,16 +94,7 @@ function guardNavigation(view, initialUrl) {
   });
 }
 
-// Simple debounce for file watcher
-function debounce(fn, ms = 250) {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
-  };
-}
-
-// ---- Layout
+// ---------- Layout ----------
 
 function layout() {
   if (!mainWindow || !topView || !bottomView) return;
@@ -108,41 +106,34 @@ function layout() {
   bottomView.setAutoResize({ width: true, height: true });
 }
 
-// ---- Apply config changes live
+// ---------- Live apply changes ----------
 
 function applyConfigChanges(next) {
-  // Determine what changed
-  const urlsChanged =
-    next.topUrl !== config.topUrl || next.bottomUrl !== config.bottomUrl;
+  const urlsChanged = next.topUrl !== config.topUrl || next.bottomUrl !== config.bottomUrl;
   const ratioChanged = next.dividerRatio !== config.dividerRatio;
   const uaChanged = next.userAgent !== config.userAgent;
   const lockChanged = next.lockToInitialOrigin !== config.lockToInitialOrigin;
 
   config = next;
 
-  // Update user agent on each view if changed
   if (uaChanged && topView && bottomView) {
     try {
       if (config.userAgent) {
         topView.webContents.setUserAgent(config.userAgent);
         bottomView.webContents.setUserAgent(config.userAgent);
       } else {
-        // Restore defaults if we captured them
         if (defaultUA.top) topView.webContents.setUserAgent(defaultUA.top);
         if (defaultUA.bottom) bottomView.webContents.setUserAgent(defaultUA.bottom);
       }
     } catch {}
   }
 
-  // Re-guard navigation if lock setting changed
   if (lockChanged) {
-    // Remove old handlers by recreating views is heavy; instead, rely on handler logic
-    // Since we only ever *tighten* rules, we can add guards now if they weren't present
+    // Re-apply guards (handlers are additive; we only tighten rules when enabled)
     guardNavigation(topView, config.topUrl);
     guardNavigation(bottomView, config.bottomUrl);
   }
 
-  // Reload URLs if changed or UA changed (UA affects next navigation)
   if (urlsChanged || uaChanged) {
     const loadOpts = config.userAgent ? { userAgent: config.userAgent } : undefined;
     if (topView && topView.webContents.getURL() !== config.topUrl) {
@@ -150,6 +141,7 @@ function applyConfigChanges(next) {
     } else if (uaChanged && topView) {
       topView.webContents.reload();
     }
+
     if (bottomView && bottomView.webContents.getURL() !== config.bottomUrl) {
       bottomView.webContents.loadURL(config.bottomUrl, loadOpts).catch(() => {});
     } else if (uaChanged && bottomView) {
@@ -157,48 +149,47 @@ function applyConfigChanges(next) {
     }
   }
 
-  // Re-apply layout if divider changed
   if (ratioChanged) layout();
 }
 
 function watchConfigFile() {
   if (!cfgPathInUse) return;
-  try {
-    const handler = debounce(() => {
-      try {
-        const next = loadConfig();
-        applyConfigChanges(next);
-      } catch {
-        // Ignore transient parse errors while file is being saved
-      }
-    }, 300);
 
-    // Prefer fs.watch; if it fails on network shares, fall back to watchFile
-    const watcher = fs.watch(cfgPathInUse, { persistent: false }, handler);
-    // On some filesystems, rename events may fire; also handle errors silently
+  const tryApply = debounce(() => {
+    try {
+      const next = loadConfig();
+      applyConfigChanges(next);
+    } catch {
+      // ignore transient parse errors while saving
+    }
+  }, 300);
+
+  try {
+    const watcher = fs.watch(cfgPathInUse, { persistent: false }, tryApply);
     watcher.on('error', () => {
-      try {
-        fs.unwatchFile(cfgPathInUse);
-      } catch {}
-      try {
-        fs.watchFile(cfgPathInUse, { interval: 500 }, handler);
-      } catch {}
+      try { fs.unwatchFile(cfgPathInUse); } catch {}
+      try { fs.watchFile(cfgPathInUse, { interval: 500 }, tryApply); } catch {}
     });
   } catch {
-    // Fallback: polling
-    try {
-      fs.watchFile(cfgPathInUse, { interval: 500 }, debounce(() => {
-        const next = loadConfig();
-        applyConfigChanges(next);
-      }, 300));
-    } catch {}
+    try { fs.watchFile(cfgPathInUse, { interval: 500 }, tryApply); } catch {}
   }
 }
 
-// ---- Create window and views
+function debounce(fn, ms = 250) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+}
+
+// ---------- Create window ----------
 
 function createWindow() {
   config = loadConfig();
+  console.log('[TwoSites] Using config at:', cfgPathInUse);
+  console.log('[TwoSites] Top URL:', config.topUrl);
+  console.log('[TwoSites] Bottom URL:', config.bottomUrl);
 
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -207,8 +198,8 @@ function createWindow() {
     minWidth: config.minWidth,
     minHeight: config.minHeight,
     backgroundColor: '#111111',
-    show: true,                 // show immediately
-    autoHideMenuBar: true,      // no menu (no address bar)
+    show: true,            // show immediately
+    autoHideMenuBar: true, // no address bar/menu
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -220,24 +211,18 @@ function createWindow() {
   // Safety net: ensure it shows even if pages hang
   setTimeout(() => { try { mainWindow.show(); } catch {} }, 1500);
 
-  // Create the two panes
-  topView = new BrowserView({
-    webPreferences: { contextIsolation: true, sandbox: true },
-  });
-  bottomView = new BrowserView({
-    webPreferences: { contextIsolation: true, sandbox: true },
-  });
+  topView = new BrowserView({ webPreferences: { contextIsolation: true, sandbox: true } });
+  bottomView = new BrowserView({ webPreferences: { contextIsolation: true, sandbox: true } });
 
   mainWindow.setBrowserView(topView);
   mainWindow.addBrowserView(bottomView);
 
-  // Capture default UA strings before any overrides
+  // capture default UA
   try {
     defaultUA.top = topView.webContents.getUserAgent?.() || null;
     defaultUA.bottom = bottomView.webContents.getUserAgent?.() || null;
   } catch {}
 
-  // Optional custom UA
   if (config.userAgent) {
     try {
       topView.webContents.setUserAgent(config.userAgent);
@@ -245,20 +230,16 @@ function createWindow() {
     } catch {}
   }
 
-  // Load URLs
   const loadOpts = config.userAgent ? { userAgent: config.userAgent } : undefined;
   topView.webContents.loadURL(config.topUrl, loadOpts).catch(() => {});
   bottomView.webContents.loadURL(config.bottomUrl, loadOpts).catch(() => {});
-
-  // Navigation guard (optional, per config)
   guardNavigation(topView, config.topUrl);
   guardNavigation(bottomView, config.bottomUrl);
 
-  // Layout now and on resize
   mainWindow.on('resize', layout);
   mainWindow.once('ready-to-show', () => { layout(); try { mainWindow.show(); } catch {} });
 
-  // Useful diagnostics if something fails to load
+  // diagnostics
   for (const wc of [topView.webContents, bottomView.webContents]) {
     wc.on('did-fail-load', (_e, code, desc, validatedURL) => {
       console.error('did-fail-load', code, desc, validatedURL);
@@ -266,11 +247,10 @@ function createWindow() {
     wc.on('crashed', () => console.error('webContents crashed'));
   }
 
-  // Start watching config.json for live updates
   watchConfigFile();
 }
 
-// ---- App lifecycle
+// ---------- App lifecycle ----------
 
 app.whenReady().then(() => {
   createWindow();
