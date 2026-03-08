@@ -21,11 +21,11 @@
       "preload.js",
       "config.json",
       "package.json",
-      "assets/favicon.png"
+      "assets/pmro_red.ico"
     ],
     "win": {
       "target": ["portable"],
-      "icon": "assets/favicon.png"
+      "icon": "assets/pmro_red.ico"
     }
   }
 }
